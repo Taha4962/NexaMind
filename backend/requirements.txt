@@ -1,0 +1,48 @@
+# ══════════════════════════════════════════
+# NexaMind Backend — Python Dependencies
+# ══════════════════════════════════════════
+
+# ── Web Framework ──
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+python-multipart==0.0.12
+
+# ── Data Validation ──
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# ── Database ──
+motor==3.6.0
+pymongo==4.9.2
+
+# ── Authentication ──
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# ── AI / LLM ──
+google-generativeai==0.8.4
+groq==0.11.0
+langchain==0.3.14
+langchain-google-genai==2.0.8
+
+# ── Vector Store ──
+# chromadb==0.5.23 (Commented out: requires Microsoft Visual C++ Build Tools to install on Python 3.13)
+
+# ── Knowledge Graph ──
+networkx==3.4.2
+
+# ── Document Processing ──
+pymupdf==1.24.14
+python-docx==1.1.2
+
+# ── Cloud Storage ──
+cloudinary==1.41.0
+
+# ── Rate Limiting ──
+slowapi==0.1.9
+
+# ── HTTP Client ──
+httpx==0.27.2
+
+# ── Environment ──
+python-dotenv==1.0.1

@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  # ── MongoDB ──
+  mongodb:
+    image: mongo:7.0
+    container_name: nexamind-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexamind_admin
+      MONGO_INITDB_ROOT_PASSWORD: nexamind_dev_password
+      MONGO_INITDB_DATABASE: nexamind
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - nexamind-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── ChromaDB ──
+  chromadb:
+    image: chromadb/chroma:0.5.0
+    container_name: nexamind-chromadb
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    networks:
+      - nexamind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mongodb_data:
+    driver: local
+  chromadb_data:
+    driver: local
+
+networks:
+  nexamind-network:
+    driver: bridge
