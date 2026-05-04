@@ -231,6 +231,12 @@ The app will be available at `http://localhost:3000`.
 - [x] python-docx DOCX text extraction
 - [x] text-embedding-004 batch embedding with rate limit safety
 - [x] ChromaDB per-user document collections
+- [x] Auth UI: sign-up with real-time validation + password strength meter
+- [x] Auth UI: sign-in with Google OAuth button + brute force lockout display
+- [x] Auth UI: 6-digit OTP input with auto-advance, paste support, countdown resend
+- [x] Auth UI: forgot password + reset password flow
+- [x] AuthContext with automatic access token refresh
+- [x] Access token stored in memory only (XSS safe)
 
 ## License
 

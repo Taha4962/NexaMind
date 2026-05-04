@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { toast } from "sonner";
 import axios from "axios";
@@ -10,13 +9,10 @@ import axios from "axios";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthInput } from "@/components/auth/AuthInput";
 import { AuthButton } from "@/components/auth/AuthButton";
-import { GoogleButton } from "@/components/auth/GoogleButton";
-import { AuthDivider } from "@/components/auth/AuthDivider";
-import { registerSchema } from "@/lib/validations";
+import { resetPasswordSchema } from "@/lib/validations";
 
-type RegisterInput = z.infer<typeof registerSchema>;
+type ResetInput = z.infer<typeof resetPasswordSchema>;
 
-// Password strength checker helper
 const getPasswordStrength = (password: string) => {
   const criteria = {
     length: password.length >= 8,
@@ -41,26 +37,40 @@ const getPasswordStrength = (password: string) => {
   return { criteria, label, color, count };
 };
 
-export default function SignUpPage() {
+function ResetPasswordContent() {
   const router = useRouter();
-  const [formData, setFormData] = useState<RegisterInput>({
-    name: "",
-    email: "",
-    password: "",
+  const searchParams = useSearchParams();
+  const email = searchParams.get("email");
+
+  const [formData, setFormData] = useState<ResetInput>({
+    email: email || "",
+    otp: "",
+    newPassword: "",
     confirmPassword: "",
   });
-  const [errors, setErrors] = useState<Partial<Record<keyof RegisterInput, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<keyof ResetInput, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const strength = getPasswordStrength(formData.password);
+  useEffect(() => {
+    // Retrieve OTP from session storage
+    const otp = sessionStorage.getItem("reset_otp");
+    if (!email || !otp) {
+      toast.error("Missing reset context. Please try again.");
+      router.push("/forgot-password");
+    } else {
+      setFormData((prev) => ({ ...prev, email, otp }));
+    }
+  }, [email, router]);
 
-  const validateField = (field: keyof RegisterInput, value: string, fullData: any) => {
+  const strength = getPasswordStrength(formData.newPassword);
+
+  const validateField = (field: "newPassword" | "confirmPassword", value: string) => {
     try {
       if (field === "confirmPassword") {
-        if (value !== fullData.password) throw new Error("Passwords do not match");
+        if (value !== formData.newPassword) throw new Error("Passwords do not match");
       } else {
-        const baseSchema = (registerSchema as any)._def.schema || registerSchema;
-        baseSchema.shape[field].parse(value);
+        const baseSchema = (resetPasswordSchema as any)._def.schema || resetPasswordSchema;
+        z.object({ newPassword: baseSchema.shape.newPassword }).parse({ newPassword: value });
       }
       setErrors((prev) => ({ ...prev, [field]: undefined }));
     } catch (error: any) {
@@ -75,12 +85,16 @@ export default function SignUpPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     
-    const newFormData = { ...formData, [name]: value };
-    setFormData(newFormData);
-    validateField(name as keyof RegisterInput, value, newFormData);
-    
-    if (name === "password" && formData.confirmPassword) {
-      validateField("confirmPassword", formData.confirmPassword, newFormData);
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === "newPassword" || name === "confirmPassword") {
+      validateField(name as "newPassword" | "confirmPassword", value);
+      if (name === "newPassword" && formData.confirmPassword) {
+        if (value !== formData.confirmPassword) {
+          setErrors((prev) => ({ ...prev, confirmPassword: "Passwords do not match" }));
+        } else {
+          setErrors((prev) => ({ ...prev, confirmPassword: undefined }));
+        }
+      }
     }
   };
 
@@ -88,7 +102,7 @@ export default function SignUpPage() {
     e.preventDefault();
     
     try {
-      registerSchema.parse(formData);
+      resetPasswordSchema.parse(formData);
     } catch (error) {
       if (error instanceof z.ZodError) {
         const newErrors: any = {};
@@ -102,13 +116,14 @@ export default function SignUpPage() {
 
     setIsLoading(true);
     try {
-      const res = await axios.post("/api/auth/register", formData);
+      const res = await axios.post("/api/auth/reset-password", formData);
       if (res.data.success) {
-        toast.success("Account created! Please verify your email.");
-        router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}&type=register`);
+        sessionStorage.removeItem("reset_otp"); // Clean up
+        toast.success("Password reset successfully. You can now sign in.");
+        router.push("/sign-in");
       }
     } catch (error: any) {
-      const message = error.response?.data?.message || "Registration failed";
+      const message = error.response?.data?.message || "Failed to reset password";
       toast.error(message);
     } finally {
       setIsLoading(false);
@@ -116,45 +131,21 @@ export default function SignUpPage() {
   };
 
   return (
-    <AuthCard title="Create an account" description="Enter your details to get started">
-      <GoogleButton />
-      <AuthDivider />
-
+    <AuthCard title="Set new password" description="Please enter your new password below.">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <AuthInput
-          label="Full Name"
-          name="name"
-          placeholder="John Doe"
-          value={formData.name}
-          onChange={handleChange}
-          error={errors.name}
-          disabled={isLoading}
-        />
-        
-        <AuthInput
-          label="Email"
-          name="email"
-          type="email"
-          placeholder="name@example.com"
-          value={formData.email}
-          onChange={handleChange}
-          error={errors.email}
-          disabled={isLoading}
-        />
-        
         <div className="space-y-2">
           <AuthInput
-            label="Password"
-            name="password"
+            label="New Password"
+            name="newPassword"
             type="password"
             placeholder="••••••••"
-            value={formData.password}
+            value={formData.newPassword}
             onChange={handleChange}
-            error={errors.password}
+            error={errors.newPassword}
             disabled={isLoading}
           />
           
-          {formData.password.length > 0 && (
+          {formData.newPassword.length > 0 && (
             <div className="space-y-1 mt-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Strength: {strength.label}</span>
@@ -180,16 +171,17 @@ export default function SignUpPage() {
         />
 
         <AuthButton type="submit" isLoading={isLoading} className="mt-2">
-          Sign up
+          Reset Password
         </AuthButton>
       </form>
-
-      <div className="text-center text-sm mt-4">
-        <span className="text-muted-foreground">Already have an account? </span>
-        <Link href="/sign-in" className="text-primary hover:underline">
-          Sign in
-        </Link>
-      </div>
     </AuthCard>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="text-muted-foreground animate-pulse">Loading...</div>}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

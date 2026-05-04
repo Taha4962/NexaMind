@@ -43,6 +43,12 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        success: "#10b981",
+        warning: "#f59e0b",
+        "primary-hover": "#818cf8",
+        "primary-light": "#c4b5fd",
+        "border-focus": "#2e2e4e",
+        "text-placeholder": "#475569",
       },
       borderRadius: {
         lg: "var(--radius)",
