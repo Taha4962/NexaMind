@@ -21,6 +21,10 @@ export interface IUser extends Document {
   isTwoFactorEnabled: boolean;
   role: UserRole;
   avatar?: string;
+  /** Timestamp of the user's most recent successful login */
+  lastLoginAt?: Date;
+  /** Total number of successful logins */
+  loginCount: number;
   createdAt: Date;
   updatedAt: Date;
   /** Compare plain-text password against the stored bcrypt hash. */
@@ -72,6 +76,13 @@ const userSchema = new Schema<IUser, IUserModel>(
     },
     avatar: {
       type: String,
+    },
+    lastLoginAt: {
+      type: Date,
+    },
+    loginCount: {
+      type: Number,
+      default: 0,
     },
   },
   { timestamps: true }

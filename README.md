@@ -218,8 +218,12 @@ The app will be available at `http://localhost:3000`.
 - [x] Brute force protection (5 failures = 30 min lockout)
 - [x] OTP email via Nodemailer (register + reset + 2FA)
 - [x] In-memory rate limiting (register: 5/hr, login: 10/min per IP)
-- [ ] Google OAuth (coming Step 3)
-- [ ] 2FA enforcement on login (coming Step 3)
+- [x] Google OAuth 2.0 (issues own JWT, links to existing accounts)
+- [x] Two-factor authentication via email OTP (enable/disable/confirm)
+- [x] Change password with session rotation
+- [x] CSRF protection on OAuth state parameter
+- [x] Login tracking (loginCount, lastLoginAt)
+- [x] GET /api/v1/agent/me — backend JWT verification smoke test
 
 ## License
 

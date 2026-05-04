@@ -133,8 +133,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ── 8. Reset failed attempts on successful auth ───────────────────────
+    // ── 8. Reset failed attempts + update login metadata ─────────────────
     await LoginAttempt.reset(email, ip);
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { loginCount: 1 }, $set: { lastLoginAt: new Date() } }
+    );
 
     // ── 9. 2FA flow ───────────────────────────────────────────────────────
     if (user.isTwoFactorEnabled) {
