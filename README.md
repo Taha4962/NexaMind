@@ -207,6 +207,20 @@ The app will be available at `http://localhost:3000`.
 └── README.md
 ```
 
+## Completed Features
+
+- [x] Project scaffold and folder structure
+- [x] MongoDB models: User, OtpVerification, LoginAttempt, RevokedToken
+- [x] Custom auth: register, login, logout, refresh, me
+- [x] JWT access token (15 min) + refresh token (7 days, httpOnly cookie)
+- [x] Token blacklist on logout (by JTI claim)
+- [x] Refresh token rotation with replay-attack protection
+- [x] Brute force protection (5 failures = 30 min lockout)
+- [x] OTP email via Nodemailer (register + reset + 2FA)
+- [x] In-memory rate limiting (register: 5/hr, login: 10/min per IP)
+- [ ] Google OAuth (coming Step 3)
+- [ ] 2FA enforcement on login (coming Step 3)
+
 ## License
 
 Private project — all rights reserved.
