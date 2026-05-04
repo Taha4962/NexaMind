@@ -210,7 +210,7 @@ The app will be available at `http://localhost:3000`.
 ## Completed Features
 
 - [x] Project scaffold and folder structure
-- [x] MongoDB models: User, OtpVerification, LoginAttempt, RevokedToken
+- [x] MongoDB models: User, OtpVerification, LoginAttempt, RevokedToken, Document
 - [x] Custom auth: register, login, logout, refresh, me
 - [x] JWT access token (15 min) + refresh token (7 days, httpOnly cookie)
 - [x] Token blacklist on logout (by JTI claim)
@@ -224,6 +224,13 @@ The app will be available at `http://localhost:3000`.
 - [x] CSRF protection on OAuth state parameter
 - [x] Login tracking (loginCount, lastLoginAt)
 - [x] GET /api/v1/agent/me — backend JWT verification smoke test
+- [x] Cloudinary integration (documents, avatars)
+- [x] Document upload API with 10MB limit, type validation
+- [x] Document ingestion pipeline: download → extract → chunk → embed → ChromaDB
+- [x] PyMuPDF PDF text extraction
+- [x] python-docx DOCX text extraction
+- [x] text-embedding-004 batch embedding with rate limit safety
+- [x] ChromaDB per-user document collections
 
 ## License
 
