@@ -207,6 +207,37 @@ The app will be available at `http://localhost:3000`.
 └── README.md
 ```
 
+## Completed Features
+
+- [x] Project scaffold and folder structure
+- [x] MongoDB models: User, OtpVerification, LoginAttempt, RevokedToken, Document
+- [x] Custom auth: register, login, logout, refresh, me
+- [x] JWT access token (15 min) + refresh token (7 days, httpOnly cookie)
+- [x] Token blacklist on logout (by JTI claim)
+- [x] Refresh token rotation with replay-attack protection
+- [x] Brute force protection (5 failures = 30 min lockout)
+- [x] OTP email via Nodemailer (register + reset + 2FA)
+- [x] In-memory rate limiting (register: 5/hr, login: 10/min per IP)
+- [x] Google OAuth 2.0 (issues own JWT, links to existing accounts)
+- [x] Two-factor authentication via email OTP (enable/disable/confirm)
+- [x] Change password with session rotation
+- [x] CSRF protection on OAuth state parameter
+- [x] Login tracking (loginCount, lastLoginAt)
+- [x] GET /api/v1/agent/me — backend JWT verification smoke test
+- [x] Cloudinary integration (documents, avatars)
+- [x] Document upload API with 10MB limit, type validation
+- [x] Document ingestion pipeline: download → extract → chunk → embed → ChromaDB
+- [x] PyMuPDF PDF text extraction
+- [x] python-docx DOCX text extraction
+- [x] text-embedding-004 batch embedding with rate limit safety
+- [x] ChromaDB per-user document collections
+- [x] Auth UI: sign-up with real-time validation + password strength meter
+- [x] Auth UI: sign-in with Google OAuth button + brute force lockout display
+- [x] Auth UI: 6-digit OTP input with auto-advance, paste support, countdown resend
+- [x] Auth UI: forgot password + reset password flow
+- [x] AuthContext with automatic access token refresh
+- [x] Access token stored in memory only (XSS safe)
+
 ## License
 
 Private project — all rights reserved.

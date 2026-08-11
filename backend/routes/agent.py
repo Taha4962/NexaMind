@@ -53,3 +53,33 @@ async def agent_chat(
         "Will integrate intent classification, agent routing, message persistence, "
         "and streaming response generation."
     )
+
+
+@router.get(
+    "/me",
+    summary="Verify JWT authentication",
+    description=(
+        "Returns the authenticated user's identity decoded from the JWT access token. "
+        "Use this to confirm the Python backend correctly validates JWTs issued by Next.js."
+    ),
+    response_description="Decoded token payload: userId, email, role",
+)
+async def agent_me(
+    current_user: Annotated[TokenPayload, Depends(get_current_user)],
+) -> dict[str, str]:
+    """
+    Auth smoke-test endpoint.
+
+    Protected by the get_current_user dependency which verifies the
+    HS256 JWT signature, checks expiry, and checks the jti against the
+    MongoDB revoked_tokens collection.
+
+    Returns:
+        userId, email, and role from the decoded access token payload.
+    """
+    return {
+        "userId": current_user.user_id,
+        "email": current_user.email,
+        "role": current_user.role.value,
+    }
+

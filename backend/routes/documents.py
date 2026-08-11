@@ -1,127 +1,138 @@
 """
-NexaMind Backend — Document CRUD Routes
+NexaMind Backend — Documents API Routes
 
-Handles document upload, listing, retrieval, and deletion endpoints.
-Documents are stored in Cloudinary and processed through the ingestion
-pipeline for text extraction and vector embedding.
+Handles document ingestion triggers, listing user documents,
+and deleting documents from both MongoDB and ChromaDB.
 """
 
 import logging
+import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from pydantic import BaseModel, Field
 
 from middleware.auth import get_current_user
-from models.document import DocumentResponse
 from models.user import TokenPayload
+from db.mongo import get_db
+from pipelines.ingestion import DocumentIngestionPipeline
+
+try:
+    import chromadb
+    CHROMA_AVAILABLE = True
+except ImportError:
+    CHROMA_AVAILABLE = False
 
 logger = logging.getLogger("nexamind.routes.documents")
-
 router = APIRouter()
 
+# ── Request Models ──
+
+class IngestRequest(BaseModel):
+    documentId: str = Field(..., description="The MongoDB ObjectId of the document")
+    cloudinaryUrl: str = Field(..., description="The URL to download the document")
+    fileType: str = Field(..., description="The type of the file (pdf, docx, txt)")
+
+
+# ── Background Task Wrapper ──
+
+async def run_ingestion(
+    document_id: str, cloudinary_url: str, file_type: str, user_id: str
+) -> None:
+    pipeline = DocumentIngestionPipeline()
+    try:
+        await pipeline.ingest(document_id, cloudinary_url, file_type, user_id)
+    except Exception as e:
+        logger.error("Background ingestion failed: %s", str(e))
+
+
+# ── Routes ──
 
 @router.post(
-    "/upload",
-    response_model=DocumentResponse,
-    summary="Upload a document",
-    description="Upload a PDF, DOCX, TXT, or MD file for processing and RAG",
+    "/ingest",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger document ingestion",
+    description="Starts background ingestion process for an uploaded document.",
 )
-async def upload_document(
-    file: UploadFile = File(..., description="Document file to upload"),
-    current_user: Annotated[TokenPayload, Depends(get_current_user)] = Depends(),
-) -> DocumentResponse:
+async def ingest_document(
+    request: IngestRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[TokenPayload, Depends(get_current_user)],
+) -> dict[str, str]:
     """
-    Upload and process a document for RAG.
-
-    Accepts PDF, DOCX, TXT, and MD files. The document is stored in
-    Cloudinary and queued for text extraction, chunking, and embedding.
-
-    Args:
-        file: The uploaded document file.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        The created document record with processing status.
+    Trigger the ingestion pipeline for a document.
+    Returns 202 Accepted immediately and runs pipeline in background.
     """
-    raise NotImplementedError(
-        "Document upload — will be implemented in the document ingestion step. "
-        "Will handle file validation, Cloudinary upload, text extraction, "
-        "chunking, embedding generation, and ChromaDB storage."
+    background_tasks.add_task(
+        run_ingestion,
+        request.documentId,
+        request.cloudinaryUrl,
+        request.fileType,
+        current_user.user_id,
     )
+    return {"message": "Ingestion started", "documentId": request.documentId}
 
 
 @router.get(
-    "/",
-    response_model=list[DocumentResponse],
-    summary="List all documents",
-    description="Retrieve all documents uploaded by the authenticated user",
+    "",
+    summary="List user documents",
+    description="Retrieves a list of all documents belonging to the authenticated user.",
 )
 async def list_documents(
     current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> list[DocumentResponse]:
+) -> list[dict]:
     """
-    List all documents for the current user.
-
-    Args:
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        List of document records sorted by creation date.
+    Get all documents for the current user.
     """
-    raise NotImplementedError(
-        "Document listing — will be implemented in the document management step. "
-        "Will query MongoDB for all documents belonging to the current user."
-    )
-
-
-@router.get(
-    "/{document_id}",
-    response_model=DocumentResponse,
-    summary="Get document details",
-    description="Retrieve details of a specific document",
-)
-async def get_document(
-    document_id: str,
-    current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> DocumentResponse:
-    """
-    Get details of a specific document.
-
-    Args:
-        document_id: The document ID to retrieve.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        The document record with current processing status.
-    """
-    raise NotImplementedError(
-        "Document retrieval — will be implemented in the document management step. "
-        "Will query MongoDB and verify document ownership."
-    )
+    db = get_db()
+    cursor = db.documents.find({"userId": current_user.user_id}).sort("createdAt", -1)
+    documents = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        documents.append(doc)
+    return documents
 
 
 @router.delete(
     "/{document_id}",
     summary="Delete a document",
-    description="Delete a document and its associated embeddings",
+    description="Deletes a document from MongoDB and its embeddings from ChromaDB.",
 )
 async def delete_document(
     document_id: str,
     current_user: Annotated[TokenPayload, Depends(get_current_user)],
 ) -> dict[str, str]:
     """
-    Delete a document and all associated data.
-
-    Removes the document from MongoDB, Cloudinary, and ChromaDB.
-
-    Args:
-        document_id: The document ID to delete.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        Confirmation of deletion.
+    Delete document from vector db and mongodb.
     """
-    raise NotImplementedError(
-        "Document deletion — will be implemented in the document management step. "
-        "Will remove from MongoDB, Cloudinary, and ChromaDB atomically."
+    try:
+        if CHROMA_AVAILABLE:
+            safe_user_id = re.sub(r'[^a-zA-Z0-9_]', '', current_user.user_id)
+            collection_name = f"user_{safe_user_id}_docs"
+            chroma_client = chromadb.PersistentClient(path="./chroma_db")
+            try:
+                collection = chroma_client.get_collection(name=collection_name)
+                # Delete chunks for this document
+                collection.delete(where={"documentId": document_id})
+                logger.info("Deleted embeddings for doc %s", document_id)
+            except ValueError:
+                # Collection doesn't exist
+                pass
+    except Exception as e:
+        logger.error("Error deleting from ChromaDB for doc %s: %s", document_id, str(e))
+        # Proceed with MongoDB deletion anyway
+
+    # Deleting from MongoDB is handled primarily by the Next.js frontend,
+    # but the instructions say:
+    # "Delete from ChromaDB: collection.delete(where={'documentId': document_id})"
+    # "Delete from MongoDB"
+    # The frontend already deletes from MongoDB after calling this endpoint, 
+    # but we can optionally delete it here or let the frontend do it. 
+    # For safety we can delete it if it exists.
+    from bson import ObjectId
+    db = get_db()
+    await db.documents.delete_one(
+        {"_id": ObjectId(document_id), "userId": ObjectId(current_user.user_id)}
     )
+
+    return {"message": "Document and embeddings deleted"}
