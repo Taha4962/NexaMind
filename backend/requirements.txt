@@ -26,7 +26,7 @@ langchain==0.3.14
 langchain-google-genai==2.0.8
 
 # ── Vector Store ──
-# chromadb==0.5.23 (Commented out: requires Microsoft Visual C++ Build Tools to install on Python 3.13)
+chromadb>=0.5.23          # pre-built wheel available for Python 3.13+ on Windows (abi3)
 
 # ── Knowledge Graph ──
 networkx==3.4.2
