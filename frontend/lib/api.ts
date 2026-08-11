@@ -107,4 +107,69 @@ api.interceptors.response.use(
   }
 );
 
+export interface StreamChunk {
+  type: "token" | "done" | "error" | "thinking";
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Calls /api/agent/chat/stream and yields parsed StreamChunk objects.
+ * Uses fetch() with ReadableStream to parse SSE lines starting with "data: ".
+ */
+export async function* streamChat(
+  message: string,
+  chatId: string | null,
+  accessToken: string,
+  attachedDocIds: string[] = []
+): AsyncGenerator<StreamChunk, void, unknown> {
+  const response = await fetch("/api/agent/chat/stream", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ message, chatId, attachedDocIds }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `Streaming request failed with status ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Response body is null");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+
+    // Keep the last incomplete line in the buffer
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("data: ")) {
+        try {
+          const chunk = JSON.parse(trimmed.slice(6)) as StreamChunk;
+          yield chunk;
+          if (chunk.type === "done" || chunk.type === "error") {
+            return;
+          }
+        } catch {
+          // Ignore parse errors for partial json
+        }
+      }
+    }
+  }
+}
+
 export default api;

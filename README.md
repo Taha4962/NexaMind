@@ -237,6 +237,13 @@ The app will be available at `http://localhost:3000`.
 - [x] Auth UI: forgot password + reset password flow
 - [x] AuthContext with automatic access token refresh
 - [x] Access token stored in memory only (XSS safe)
+- [x] Server-Sent Events streaming from Gemini and Groq models
+- [x] Next.js SSE proxy gateway (Python backend URL never exposed to browser)
+- [x] StreamingManager: handles both Gemini streaming and Groq streaming
+- [x] Intent classification before streaming (Flash-Lite, non-streaming, fast)
+- [x] streamChat() async generator for frontend SSE consumption
+- [x] useStreamChat hook: accumulates tokens, invalidates cache on completion
+- [x] Messages saved to MongoDB on stream completion with full metadata
 
 ## License
 
