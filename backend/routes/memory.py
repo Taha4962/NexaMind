@@ -1,151 +1,92 @@
 """
 NexaMind Backend — Memory CRUD Routes
 
-Handles memory creation, listing, retrieval, update, and deletion.
-Memories are user facts, preferences, and experiences that the AI
-uses to personalize responses across sessions.
+Handles listing, deleting, and clearing user memories stored in MongoDB and ChromaDB.
 """
 
 import logging
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from middleware.auth import get_current_user
-from models.memory import MemoryCreate, MemoryResponse, MemoryUpdate
+from memory.long_term import LongTermMemory
+from models.memory import Memory
 from models.user import TokenPayload
 
 logger = logging.getLogger("nexamind.routes.memory")
 
 router = APIRouter()
-
-
-@router.post(
-    "/",
-    response_model=MemoryResponse,
-    summary="Create a memory",
-    description="Store a new memory for the authenticated user",
-)
-async def create_memory(
-    memory: MemoryCreate,
-    current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> MemoryResponse:
-    """
-    Create a new memory entry.
-
-    Stores a user fact, preference, or experience that the AI will
-    use to personalize future responses.
-
-    Args:
-        memory: The memory data to store.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        The created memory record.
-    """
-    raise NotImplementedError(
-        "Memory creation — will be implemented in the memory layer step. "
-        "Will store in MongoDB and generate embedding for semantic retrieval."
-    )
+long_term_memory = LongTermMemory()
 
 
 @router.get(
-    "/",
-    response_model=list[MemoryResponse],
+    "",
+    response_model=list[Memory],
     summary="List all memories",
-    description="Retrieve all memories for the authenticated user",
+    description="Retrieve all long-term memories for the authenticated user",
 )
 async def list_memories(
     current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> list[MemoryResponse]:
-    """
-    List all memories for the current user.
-
-    Args:
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        List of memory records sorted by importance and recency.
-    """
-    raise NotImplementedError(
-        "Memory listing — will be implemented in the memory layer step. "
-        "Will query MongoDB with sorting by importance and access frequency."
-    )
-
-
-@router.get(
-    "/{memory_id}",
-    response_model=MemoryResponse,
-    summary="Get memory details",
-    description="Retrieve a specific memory",
-)
-async def get_memory(
-    memory_id: str,
-    current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> MemoryResponse:
-    """
-    Get details of a specific memory.
-
-    Args:
-        memory_id: The memory ID to retrieve.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        The memory record.
-    """
-    raise NotImplementedError(
-        "Memory retrieval — will be implemented in the memory layer step."
-    )
-
-
-@router.put(
-    "/{memory_id}",
-    response_model=MemoryResponse,
-    summary="Update a memory",
-    description="Update an existing memory",
-)
-async def update_memory(
-    memory_id: str,
-    memory_update: MemoryUpdate,
-    current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> MemoryResponse:
-    """
-    Update an existing memory.
-
-    Args:
-        memory_id: The memory ID to update.
-        memory_update: The fields to update.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        The updated memory record.
-    """
-    raise NotImplementedError(
-        "Memory update — will be implemented in the memory layer step. "
-        "Will update MongoDB and re-generate embedding if content changed."
+    category: Optional[str] = Query(None, description="Filter memories by category"),
+) -> list[Memory]:
+    """List user memories from MongoDB."""
+    return await long_term_memory.get_all_memories(
+        user_id=current_user.user_id, category=category
     )
 
 
 @router.delete(
     "/{memory_id}",
-    summary="Delete a memory",
-    description="Delete a memory and its associated embedding",
+    summary="Delete a single memory",
+    description="Delete a memory by ID from both MongoDB and ChromaDB",
 )
 async def delete_memory(
     memory_id: str,
     current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> dict[str, str]:
-    """
-    Delete a memory and its associated embedding.
-
-    Args:
-        memory_id: The memory ID to delete.
-        current_user: Authenticated user from JWT token.
-
-    Returns:
-        Confirmation of deletion.
-    """
-    raise NotImplementedError(
-        "Memory deletion — will be implemented in the memory layer step. "
-        "Will remove from MongoDB and ChromaDB."
+) -> dict[str, Any]:
+    """Delete a memory entry by ID after verifying ownership."""
+    success = await long_term_memory.delete_memory(
+        memory_id=memory_id, user_id=current_user.user_id
     )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory not found or access denied",
+        )
+    return {"success": True, "message": "Memory deleted"}
+
+
+@router.delete(
+    "",
+    summary="Clear all memories",
+    description="Delete all memories for the authenticated user from MongoDB and ChromaDB",
+)
+async def clear_all_memories(
+    current_user: Annotated[TokenPayload, Depends(get_current_user)],
+) -> dict[str, str]:
+    """Clear all memories for the user."""
+    user_id = current_user.user_id
+    try:
+        from db.mongo import MongoDB
+        from db.vector_store import ChromaVectorStore
+        import asyncio
+
+        # 1. Delete from MongoDB
+        await MongoDB.memories().delete_many({"userId": user_id})
+
+        # 2. Reset/Clear collection in ChromaDB
+        try:
+            vs = await ChromaVectorStore.get_instance()
+            collection = vs.get_memory_collection(user_id)
+            await asyncio.to_thread(collection.delete, where={"userId": user_id})
+        except Exception as chroma_exc:
+            logger.warning("Error clearing ChromaDB memory vectors for user %s: %s", user_id, chroma_exc)
+
+        return {"message": "All memories cleared"}
+    except Exception as exc:
+        logger.error("Failed to clear memories for user %s: %s", user_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear memories",
+        )

@@ -237,6 +237,13 @@ The app will be available at `http://localhost:3000`.
 - [x] Auth UI: forgot password + reset password flow
 - [x] AuthContext with automatic access token refresh
 - [x] Access token stored in memory only (XSS safe)
+- [x] ShortTermMemory: sliding window of 20 messages with auto-summarization
+- [x] LongTermMemory: Flash-Lite extraction after every response (background task)
+- [x] Semantic deduplication prevents duplicate memory storage (score > 0.92 threshold)
+- [x] Memory vector index in ChromaDB for semantic retrieval
+- [x] Memory injected into every prompt: user context summary + relevant memories
+- [x] Memory CRUD API routes (list, delete, clear all)
+- [x] Memory extraction never blocks or crashes chat flow
 
 ## License
 
