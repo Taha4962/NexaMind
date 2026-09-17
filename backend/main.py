@@ -21,7 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from db.mongo import MongoDBClient
+from db.mongo import MongoDB
+from db.vector_store import ChromaVectorStore
 from routes.agent import router as agent_router
 from routes.documents import router as documents_router
 from routes.memory import router as memory_router
@@ -43,26 +44,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan context manager.
 
-    Connects to MongoDB on startup and disconnects on shutdown.
-    Ensures clean resource management throughout the app lifecycle.
+    On startup:
+      1. Connects to MongoDB and creates all indexes.
+      2. Initializes the ChromaDB persistent client.
+    On shutdown:
+      1. Closes the MongoDB connection gracefully.
     """
-    settings = get_settings()
     logger.info("Starting NexaMind Backend v%s", APP_VERSION)
 
-    # ── Startup ──
+    # ── Startup: MongoDB ──────────────────────────────────────────────────────
     try:
-        mongo_client = MongoDBClient()
-        await mongo_client.connect(settings.mongo_url)
-        logger.info("MongoDB connection established")
+        await MongoDB.connect()
+        await MongoDB.create_indexes()
+        logger.info("MongoDB ready")
     except Exception as e:
         logger.error("Failed to connect to MongoDB: %s", str(e))
         raise
 
+    # ── Startup: ChromaDB ─────────────────────────────────────────────────────
+    try:
+        await ChromaVectorStore.get_instance()
+        logger.info("ChromaDB vector store ready")
+    except Exception as e:
+        # Non-fatal: app can still serve requests without vector search
+        logger.warning("ChromaDB initialization failed (non-fatal): %s", str(e))
+
     yield
 
-    # ── Shutdown ──
+    # ── Shutdown ──────────────────────────────────────────────────────────────
     try:
-        await mongo_client.disconnect()
+        await MongoDB.disconnect()
         logger.info("MongoDB connection closed")
     except Exception as e:
         logger.error("Error disconnecting from MongoDB: %s", str(e))

@@ -237,6 +237,18 @@ The app will be available at `http://localhost:3000`.
 - [x] Auth UI: forgot password + reset password flow
 - [x] AuthContext with automatic access token refresh
 - [x] Access token stored in memory only (XSS safe)
+- [x] ChromaDB vector store with per-user collections and cosine similarity
+- [x] MongoDB async motor client with all collection accessors and indexes
+- [x] RAG retrieval pipeline: query embedding → vector search → re-ranking → prompt assembly
+- [x] Context-aware retrieval using chat history for follow-up questions
+- [x] Source citation extraction from AI responses
+- [x] Chat CRUD API routes (Next.js): GET /api/chats, POST /api/chats, GET/DELETE /api/chats/[id]
+- [x] Paginated message history: GET /api/chats/[id]/messages?page=1&limit=20
+- [x] Basic chat endpoint with RAG + direct LLM fallback: POST /api/v1/agent/chat
+- [x] Auto-generated chat titles via Flash-Lite (first message only, never re-generated)
+- [x] Smart model routing: Flash-Lite for cheap tasks, Flash 2.5 for RAG, Groq Llama 3.3 for direct chat
+- [x] User message saved to MongoDB BEFORE LLM call (no message loss on LLM failure)
+- [x] Mongoose models: Chat, Message with source sub-document schema
 
 ## License
 
