@@ -95,14 +95,29 @@ export async function getSession() {
  * Includes a unique `jti` claim for blacklisting on logout.
  */
 export function generateAccessToken(
-  userId: string,
-  email: string,
-  role: string
+  userIdOrPayload: string | { userId: string; email: string; role?: string },
+  email?: string,
+  role?: string
 ): string {
   const secret = process.env.JWT_ACCESS_SECRET;
   if (!secret) throw new Error("JWT_ACCESS_SECRET environment variable is not set");
 
-  return jwt.sign({ userId, email, role, jti: randomUUID() }, secret, {
+  let payload: { userId: string; email: string; role: string };
+  if (typeof userIdOrPayload === "object") {
+    payload = {
+      userId: userIdOrPayload.userId,
+      email: userIdOrPayload.email,
+      role: userIdOrPayload.role || "user",
+    };
+  } else {
+    payload = {
+      userId: userIdOrPayload,
+      email: email || "",
+      role: role || "user",
+    };
+  }
+
+  return jwt.sign({ ...payload, jti: randomUUID() }, secret, {
     expiresIn: "15m",
   });
 }

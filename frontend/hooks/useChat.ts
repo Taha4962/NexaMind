@@ -9,8 +9,8 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import api, { streamChat, StreamChunk } from "@/lib/api";
-import type { ApiResponse, Chat, ChatWithMessages, Message } from "@/types";
+import api, { streamChat } from "@/lib/api";
+import type { ApiResponse, Chat, Message } from "@/types";
 
 // ── 1. useChat Hook ─────────────────────────────────────────────────────────
 
@@ -60,6 +60,7 @@ export function useChatList() {
 export function useStreamChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+  const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -67,8 +68,9 @@ export function useStreamChat() {
     message: string,
     chatId: string | null,
     attachedDocIds: string[] = []
-  ) => {
+  ): Promise<string | null> => {
     setIsStreaming(true);
+    setIsWaitingForFirstToken(true);
     setStreamingContent("");
     setError(null);
 
@@ -87,13 +89,17 @@ export function useStreamChat() {
         attachedDocIds
       )) {
         if (chunk.type === "token") {
+          // First token arrived — hide typing indicator
+          setIsWaitingForFirstToken(false);
           setStreamingContent((prev) => prev + chunk.content);
         } else if (chunk.type === "done") {
           if (chunk.metadata?.chatId) {
             currentChatId = chunk.metadata.chatId as string;
           }
+          setIsWaitingForFirstToken(false);
         } else if (chunk.type === "error") {
           setError(chunk.content);
+          setIsWaitingForFirstToken(false);
         }
       }
 
@@ -102,11 +108,16 @@ export function useStreamChat() {
         await queryClient.invalidateQueries({ queryKey: ["chat", currentChatId] });
       }
       await queryClient.invalidateQueries({ queryKey: ["chats"] });
+
+      return currentChatId;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to stream message";
       setError(msg);
+      setIsWaitingForFirstToken(false);
+      return currentChatId;
     } finally {
       setIsStreaming(false);
+      setStreamingContent("");
     }
   };
 
@@ -114,6 +125,8 @@ export function useStreamChat() {
     sendMessage,
     isStreaming,
     streamingContent,
+    isWaitingForFirstToken,
     error,
   };
 }
+

@@ -194,3 +194,76 @@ export async function DELETE(
     );
   }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PATCH /api/chats/[id]
+// ═════════════════════════════════════════════════════════════════════════════
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse<ApiResponse<{ chat: ChatShape }>>> {
+  const userId = await resolveUserId();
+  if (!userId) {
+    return NextResponse.json<ApiResponse<never>>(
+      { success: false, message: "Unauthorized", error: "UNAUTHORIZED" },
+      { status: 401 }
+    );
+  }
+
+  const { id } = params;
+
+  try {
+    const body = await request.json();
+    const { title } = body;
+
+    if (!title || typeof title !== "string" || !title.trim()) {
+      return NextResponse.json<ApiResponse<never>>(
+        { success: false, message: "Title is required", error: "VALIDATION_ERROR" },
+        { status: 400 }
+      );
+    }
+
+    await connectDB();
+
+    const chat = await Chat.findById(id);
+    if (!chat) {
+      return NextResponse.json<ApiResponse<never>>(
+        { success: false, message: "Chat not found", error: "NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
+    if (chat.userId !== userId) {
+      return NextResponse.json<ApiResponse<never>>(
+        { success: false, message: "Access denied", error: "FORBIDDEN" },
+        { status: 403 }
+      );
+    }
+
+    chat.title = title.trim().slice(0, 100);
+    await chat.save();
+
+    return NextResponse.json<ApiResponse<{ chat: ChatShape }>>({
+      success: true,
+      message: "Chat updated successfully",
+      data: {
+        chat: {
+          id: chat._id.toString(),
+          title: chat.title,
+          messageCount: chat.messageCount,
+          lastMessageAt: chat.lastMessageAt ? chat.lastMessageAt.toISOString() : null,
+          createdAt: chat.createdAt.toISOString(),
+          updatedAt: chat.updatedAt.toISOString(),
+        },
+      },
+    });
+  } catch (err) {
+    console.error(`[${ROUTE} PATCH] Unhandled error:`, err);
+    return NextResponse.json<ApiResponse<never>>(
+      { success: false, message: "Failed to update chat", error: "INTERNAL_ERROR" },
+      { status: 500 }
+    );
+  }
+}
+

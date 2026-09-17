@@ -49,16 +49,20 @@ export interface User {
 // Chat & Message Types
 // ══════════════════════════════════════════
 
-/** Source attribution for RAG responses */
+/** Source attribution for RAG and web-search responses */
 export interface Source {
-  /** Source document ID */
+  /** Source document ID or URL (web sources) */
   docId: string;
-  /** Original filename */
+  /** Document ID alias used by backend */
+  documentId?: string;
+  /** Original filename or page title */
   filename: string;
-  /** Page number in source document */
+  /** Page number in source document (RAG only) */
   pageNumber: number | null;
   /** Relevant text chunk from the source */
   chunkText: string;
+  /** Full URL (web sources only) */
+  url?: string | null;
 }
 
 /** Message role in a conversation */
