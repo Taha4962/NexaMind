@@ -237,6 +237,32 @@ The app will be available at `http://localhost:3000`.
 - [x] Auth UI: forgot password + reset password flow
 - [x] AuthContext with automatic access token refresh
 - [x] Access token stored in memory only (XSS safe)
+- [x] ChromaDB vector store with per-user collections and cosine similarity
+- [x] MongoDB async motor client with all collection accessors and indexes
+- [x] RAG retrieval pipeline: query embedding → vector search → re-ranking → prompt assembly
+- [x] Context-aware retrieval using chat history for follow-up questions
+- [x] Source citation extraction from AI responses
+- [x] Chat CRUD API routes (Next.js): GET /api/chats, POST /api/chats, GET/DELETE /api/chats/[id]
+- [x] Paginated message history: GET /api/chats/[id]/messages?page=1&limit=20
+- [x] Basic chat endpoint with RAG + direct LLM fallback: POST /api/v1/agent/chat
+- [x] Auto-generated chat titles via Flash-Lite (first message only, never re-generated)
+- [x] Smart model routing: Flash-Lite for cheap tasks, Flash 2.5 for RAG, Groq Llama 3.3 for direct chat
+- [x] User message saved to MongoDB BEFORE LLM call (no message loss on LLM failure)
+- [x] Mongoose models: Chat, Message with source sub-document schema
+- [x] SSE streaming utilities with Gemini and Groq token streaming (/api/v1/agent/stream)
+- [x] Short-term memory: sliding 20-message window with auto-summarization via Flash-Lite
+- [x] Long-term memory: semantic deduplication (>0.92 cosine similarity) and vector storage
+- [x] Long-term memory retrieval & user context injection into system prompts
+- [x] Memory CRUD API routes: list, delete, clear in MongoDB and ChromaDB
+- [x] Knowledge graph with NetworkX DiGraph (per-user JSON persistence)
+- [x] Entity types: Person, Topic, Project, Place, Date, Document, Concept, Event
+- [x] Relationship types: WORKS_ON, MENTIONED_IN, RELATED_TO, OCCURRED_ON, KNOWS, AUTHORED, REFERS_TO, HAPPENED_AT, PART_OF
+- [x] GraphPipeline: Flash-Lite entity + relationship extraction after every message
+- [x] Graph traversal: BFS up to 2 hops from query entities (limit 20 results)
+- [x] Graph context injected into prompts alongside memory context
+- [x] Graph visualization data endpoint (D3 force-directed graph format, limit 100 nodes)
+- [x] Both memory extraction and graph extraction run as parallel background tasks
+- [x] Frontend API proxies for Graph and Memory routes with session authentication
 
 ## License
 
