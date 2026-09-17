@@ -262,7 +262,13 @@ The app will be available at `http://localhost:3000`.
 - [x] Graph context injected into prompts alongside memory context
 - [x] Graph visualization data endpoint (D3 force-directed graph format, limit 100 nodes)
 - [x] Both memory extraction and graph extraction run as parallel background tasks
-- [x] Frontend API proxies for Graph and Memory routes with session authentication
+- [x] Full Chat interface with real-time SSE streaming, react-markdown, code syntax highlighting, and copy actions
+- [x] Agent badge pill indicators (Direct, RAG, Memory, Web, Graph) & expandable source citations
+- [x] ChatInput with auto-growing textarea and document attachment picker
+- [x] Memory Dashboard with category filtering (preference, personal, project, event, knowledge, relationship) and confidence progress indicators
+- [x] Knowledge Graph Visualization: interactive 2D force-directed graph with node inspection, search, and type filters
+- [x] Document Manager: drag-and-drop file uploader (PDF, DOCX, TXT), upload progress bar, status polling, and retry options
+- [x] Settings Page: user profile editing, password management, 2FA enable/confirm/disable toggle, and Google OAuth status
 
 ## License
 
