@@ -24,6 +24,7 @@ google-generativeai==0.8.4
 groq==0.11.0
 langchain==0.3.14
 langchain-google-genai==2.0.8
+tavily-python==0.8.3          # Tavily web search API client (Step 11)
 
 # ── Vector Store ──
 chromadb>=0.5.23          # pre-built wheel available for Python 3.13+ on Windows (abi3)
