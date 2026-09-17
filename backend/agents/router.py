@@ -175,8 +175,21 @@ Return ONLY valid JSON matching this schema:
         )
 
         # 2. ACT
+        # For web intent: gate through needs_web_search() first to avoid
+        # wasting Tavily quota on queries that don't truly need live data.
+        actual_intent = decision.intent
+        if decision.intent == "web":
+            from agents import WebAgent as _WebAgent
+            _web_agent_check = _WebAgent()
+            needs_web = await _web_agent_check.needs_web_search(query)
+            if not needs_web:
+                logger.info(
+                    "Router ACT: intent=web but needs_web_search()=False — downgrading to direct"
+                )
+                actual_intent = "direct"
+
         result = await self._execute_subagent(
-            intent=decision.intent,
+            intent=actual_intent,
             query=query,
             user_id=user_id,
             chat_history=chat_history,
@@ -220,16 +233,33 @@ Return ONLY valid JSON matching this schema:
 
         # 4. ANSWER (Streaming)
         if model_info["provider"] == "gemini" or not self.streaming_manager.groq_client:
-            # Build Gemini prompt
+            # Build Gemini prompt — web gets a specialized citation-focused template
             system_instruction = (
                 "You are NexaMind, an intelligent and helpful personal AI assistant. "
                 "Be concise, accurate, and friendly. Respond in clear markdown."
             )
-            prompt_parts = []
-            if memory_context and agent_type != AgentType.MEMORY:
-                prompt_parts.append(memory_context)
-            if context_to_inject and agent_type != AgentType.DIRECT:
-                prompt_parts.append(context_to_inject)
+
+            prompt_parts: list[str] = []
+
+            if agent_type == AgentType.WEB and context_to_inject:
+                # Specialized web answer prompt: instruct model to cite sources
+                source_urls = "\n".join(
+                    f"- [{s.filename}]({s.url or s.documentId})"
+                    for s in sources
+                    if (s.url or s.documentId)
+                )
+                prompt_parts.append(
+                    f"{context_to_inject}\n\n"
+                    f"Based on the web search results above, answer the user's question "
+                    f"accurately and concisely. Cite your sources inline using markdown links "
+                    f"where relevant. At the end, include a 'Sources' section listing:\n"
+                    f"{source_urls}"
+                )
+            else:
+                if memory_context and agent_type != AgentType.MEMORY:
+                    prompt_parts.append(memory_context)
+                if context_to_inject and agent_type != AgentType.DIRECT:
+                    prompt_parts.append(context_to_inject)
 
             # Add recent conversation history
             if chat_history:
