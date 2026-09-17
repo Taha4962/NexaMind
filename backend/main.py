@@ -25,6 +25,7 @@ from db.mongo import MongoDB
 from db.vector_store import ChromaVectorStore
 from routes.agent import router as agent_router
 from routes.documents import router as documents_router
+from routes.graph import router as graph_router
 from routes.memory import router as memory_router
 
 # ── Logging Configuration ──
@@ -169,6 +170,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(agent_router, prefix="/api/v1/agent", tags=["Agent"])
 app.include_router(documents_router, prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(memory_router, prefix="/api/v1/memory", tags=["Memory"])
+app.include_router(graph_router, prefix="/api/v1/graph", tags=["Graph"])
 
 
 # ── Health Check ──
