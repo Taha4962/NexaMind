@@ -1,20 +1,20 @@
 """
-NexaMind Backend — Agent Chat Route
+NexaMind Backend — Agent Chat Route (Refactored)
 
-Handles conversational endpoints with:
-  • Intent check & RAG retrieval via ChromaDB
-  • Direct chat via Groq Llama 3.3 (fallback to Gemini Flash)
-  • Short-term memory (sliding window + auto-summarization)
-  • Long-term memory retrieval & user context injection
-  • Knowledge graph traversal & context injection
-  • Parallel background tasks: Long-term memory + Knowledge graph extraction
-  • SSE token-by-token streaming (/stream) and standard JSON response (/chat)
+Orchestrates chat conversations by delegating routing, context gathering,
+and LLM response generation to RouterAgent.
+
+Features:
+  - Validates session & user authentication.
+  - Persists user messages to MongoDB BEFORE calling any LLM.
+  - Passes conversation context to RouterAgent (ReAct loop: Think -> Act -> Observe -> Answer).
+  - Handles SSE streaming via /chat/stream and standard responses via /chat.
+  - Dispatches parallel background tasks for memory and knowledge graph extraction.
 """
 
 import asyncio
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 
@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 import google.generativeai as genai
 
+from agents import RouterAgent
 from config import get_settings
-from db.graph_store import get_user_graph_store
 from db.mongo import MongoDB
 from memory.long_term import LongTermMemory
 from memory.short_term import ShortTermMemory
@@ -38,158 +38,16 @@ from models.chat import (
 )
 from models.user import TokenPayload
 from pipelines.graph import GraphPipeline
-from pipelines.retrieval import RAGRetrievalPipeline
-from utils.streaming import StreamingManager
+from utils.model_router import select_model
 
 logger = logging.getLogger("nexamind.routes.agent")
 
 router = APIRouter()
 
-# ── Gemini & Groq Setup ───────────────────────────────────────────────────────
-_settings = get_settings()
-genai.configure(api_key=_settings.gemini_api_key)
-
-FLASH_MODEL = "gemini-2.5-flash"
-FLASH_LITE_MODEL = "gemini-2.0-flash-lite"
-
-try:
-    from groq import AsyncGroq
-
-    _groq_client = AsyncGroq(api_key=_settings.groq_api_key)
-    GROQ_MODEL = "llama-3.3-70b-versatile"
-    GROQ_AVAILABLE = True
-except ImportError:
-    _groq_client = None  # type: ignore[assignment]
-    GROQ_AVAILABLE = False
-    logger.warning("groq package not installed — direct chat will fall back to Gemini Flash")
-
+# ── Instantiate Agents & Pipelines ────────────────────────────────────────────
+router_agent = RouterAgent()
 long_term_memory = LongTermMemory()
 graph_pipeline = GraphPipeline()
-streaming_manager = StreamingManager()
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Helper Functions: Knowledge Graph & Context Assembly
-# ═════════════════════════════════════════════════════════════════════════════
-
-async def _extract_query_entities(query: str) -> list[str]:
-    """Extract 1-4 key entity names from user query using Flash-Lite."""
-    prompt = (
-        f"Extract 1-4 key entity names (people, projects, tools, topics, concepts, places) "
-        f"mentioned in this user query. Return ONLY a valid JSON array of strings.\n"
-        f'Example: ["NexaMind", "FastAPI", "Taha"]\n'
-        f"If no specific entities, return [].\n\n"
-        f"Query: {query}"
-    )
-    try:
-        model = genai.GenerativeModel(
-            model_name=FLASH_LITE_MODEL,
-            generation_config={"response_mime_type": "application/json"},
-        )
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        raw_text = (response.text or "[]").strip()
-        raw_text = re.sub(r"^```json\s*", "", raw_text, flags=re.MULTILINE)
-        raw_text = re.sub(r"\s*```$", "", raw_text, flags=re.MULTILINE).strip()
-        data = json.loads(raw_text)
-        if isinstance(data, list):
-            return [str(item).strip() for item in data if str(item).strip()]
-        if isinstance(data, dict) and "entities" in data:
-            return [str(e.get("name", e)).strip() for e in data["entities"] if str(e).strip()]
-        return []
-    except Exception as exc:
-        logger.debug("Entity extraction from query failed: %s", exc)
-        return []
-
-
-async def _get_graph_context(query: str, user_id: str) -> str:
-    """
-    Extracts entities from user query, traverses user's knowledge graph up to 2 hops,
-    and returns formatted context string, or "" if no relevant nodes exist.
-    """
-    try:
-        entities = await _extract_query_entities(query)
-        if not entities:
-            return ""
-
-        graph_store = get_user_graph_store(user_id)
-        matched_nodes: set[str] = set()
-
-        for ent_name in entities:
-            nid = graph_store.find_node(ent_name)
-            if nid:
-                matched_nodes.add(nid)
-
-        if not matched_nodes:
-            return ""
-
-        all_connections: list[str] = []
-        for nid in matched_nodes:
-            source_data = graph_store.graph.nodes.get(nid, {})
-            source_name = source_data.get("name", nid)
-            source_type = source_data.get("type", "Topic")
-            neighbors = graph_store.get_neighbors(nid, hops=2)
-
-            for neighbor in neighbors:
-                rel = neighbor.get("relationship", "RELATED_TO")
-                target_name = neighbor.get("name", "")
-                target_type = neighbor.get("type", "Topic")
-                if rel.startswith("INCOMING:"):
-                    actual_rel = rel.replace("INCOMING:", "")
-                    all_connections.append(
-                        f"- {target_name} ({target_type}) → {actual_rel} → {source_name} ({source_type})"
-                    )
-                else:
-                    all_connections.append(
-                        f"- {source_name} ({source_type}) → {rel} → {target_name} ({target_type})"
-                    )
-
-        if not all_connections:
-            return ""
-
-        # Deduplicate lines
-        unique_lines = list(dict.fromkeys(all_connections))
-        return "Knowledge graph context:\n" + "\n".join(unique_lines[:15])
-
-    except Exception as exc:
-        logger.error("Error retrieving graph context for user %s: %s", user_id, exc)
-        return ""
-
-
-async def _build_full_system_context(
-    query: str,
-    user_id: str,
-) -> tuple[str, str]:
-    """
-    Gathers long-term memories and knowledge graph context for the user.
-    Returns (memory_section, graph_section).
-    """
-    memory_section = ""
-    graph_section = ""
-
-    # 1. Long-term memory summary + relevant semantic memories
-    try:
-        user_summary = await long_term_memory.get_user_context_summary(user_id)
-        relevant_mems = await long_term_memory.retrieve_relevant(query, user_id, n_results=5)
-
-        mem_parts = []
-        if user_summary:
-            mem_parts.append(user_summary)
-        if relevant_mems:
-            mem_parts.append(
-                "Relevant retrieved memories:\n"
-                + "\n".join(f"- [{m.category}] {m.fact}" for m in relevant_mems)
-            )
-        memory_section = "\n\n".join(mem_parts)
-    except Exception as exc:
-        logger.warning("Failed to gather memory context: %s", exc)
-
-    # 2. Knowledge graph traversal
-    try:
-        graph_section = await _get_graph_context(query, user_id)
-    except Exception as exc:
-        logger.warning("Failed to gather graph context: %s", exc)
-
-    return memory_section, graph_section
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -200,16 +58,16 @@ async def _build_full_system_context(
     "/chat",
     response_model=ChatResponse,
     summary="Send a message to the AI agent",
-    description="Processes user message with RAG retrieval, memories, graph context, and background extraction.",
+    description="Processes user message with RouterAgent (RAG, memory synthesis, web search, or direct LLM).",
 )
 async def agent_chat(
     request: ChatRequest,
     current_user: Annotated[TokenPayload, Depends(get_current_user)],
 ) -> ChatResponse:
-    """Main chat endpoint — full RAG + memory + graph context flow with MongoDB persistence."""
+    """Main chat endpoint — full agent orchestration flow with MongoDB persistence."""
     user_id = current_user.user_id
 
-    # 1. Get or create chat
+    # 1. Get or create chat session
     chat_doc = await _get_or_create_chat(user_id, request.chatId)
     chat_id = str(chat_doc["_id"])
     is_new_chat = request.chatId is None or chat_doc.get("messageCount", 0) == 0
@@ -229,50 +87,18 @@ async def agent_chat(
     }
     await MongoDB.messages().insert_one(user_msg_doc)
 
-    # 3. Short-term memory (sliding window + auto-summary)
+    # 3. Retrieve short-term memory window
     st_memory = ShortTermMemory(chat_id, user_id)
     history = await st_memory.get_window_with_summary()
 
-    # 4. Long-term memory & Knowledge Graph context
-    memory_context, graph_context = await _build_full_system_context(request.message, user_id)
-
-    # 5. RAG retrieval
-    pipeline = RAGRetrievalPipeline()
-    chunks = await pipeline.retrieve_with_context(
-        query=request.message,
+    # 4. Delegate to RouterAgent
+    assistant_content, model_used, agent_type, sources = await router_agent.execute(
+        chat_request=request,
         user_id=user_id,
         chat_history=history,
-        n_chunks=5,
-        filter_doc_ids=request.attachedDocIds or None,
     )
 
-    # 6. Route to RAG or Direct
-    if chunks:
-        prompt = pipeline.build_rag_prompt(request.message, chunks, history)
-        # Inject memory and graph context before conversation
-        injected_context = []
-        if memory_context:
-            injected_context.append(f"USER MEMORY PROFILE:\n{memory_context}")
-        if graph_context:
-            injected_context.append(graph_context)
-
-        if injected_context:
-            prompt = "\n\n".join(injected_context) + "\n\n" + prompt
-
-        assistant_content, model_used = await _call_gemini(prompt, FLASH_MODEL)
-        agent_type = AgentType.RAG
-        sources = pipeline.extract_sources(chunks, assistant_content)
-    else:
-        assistant_content, model_used = await _call_direct(
-            query=request.message,
-            history=history,
-            memory_context=memory_context,
-            graph_context=graph_context,
-        )
-        agent_type = AgentType.DIRECT
-        sources = []
-
-    # 7. Save assistant message
+    # 5. Save assistant message
     assistant_msg_id = str(ObjectId())
     source_docs = [
         {
@@ -296,7 +122,7 @@ async def agent_chat(
     }
     await MongoDB.messages().insert_one(assistant_msg_doc)
 
-    # 8. Update chat metadata
+    # 6. Update chat metadata and auto-generate title if needed
     new_count = chat_doc.get("messageCount", 0) + 2
     update: dict[str, Any] = {
         "$set": {
@@ -313,7 +139,7 @@ async def agent_chat(
 
     await MongoDB.chats().update_one({"_id": ObjectId(chat_id)}, update)
 
-    # 9. Background tasks: Memory Extraction + Knowledge Graph Extraction (Parallel)
+    # 7. Background tasks: Memory Extraction + Knowledge Graph Extraction
     asyncio.create_task(
         long_term_memory.extract_and_save(
             user_message=request.message,
@@ -343,8 +169,20 @@ async def agent_chat(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# GET / POST /api/v1/agent/stream — SSE Token Streaming Endpoint
+# GET / POST /api/v1/agent/chat/stream & /stream — SSE Token Streaming Endpoint
 # ═════════════════════════════════════════════════════════════════════════════
+
+@router.post("/chat/stream")
+async def agent_chat_stream_post(
+    request: ChatRequest,
+    current_user: Annotated[TokenPayload, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Streams chat response tokens for POST JSON payload (Next.js proxy gateway)."""
+    return await _stream_chat_handler(
+        chat_request=request,
+        user_id=current_user.user_id,
+    )
+
 
 @router.post("/stream")
 @router.get("/stream")
@@ -353,13 +191,26 @@ async def agent_stream(
     chat_id: Optional[str] = Query(None, alias="chatId"),
     current_user: Annotated[TokenPayload, Depends(get_current_user)] = None,  # type: ignore[assignment]
 ) -> StreamingResponse:
-    """Streams chat response tokens via Server-Sent Events (SSE)."""
-    user_id = current_user.user_id
+    """Streams chat response tokens for query parameter requests."""
+    req = ChatRequest(message=message, chatId=chat_id)
+    return await _stream_chat_handler(
+        chat_request=req,
+        user_id=current_user.user_id,
+    )
 
-    # 1. Get or create chat
-    chat_doc = await _get_or_create_chat(user_id, chat_id)
+
+async def _stream_chat_handler(
+    chat_request: ChatRequest,
+    user_id: str,
+) -> StreamingResponse:
+    """Internal streaming handler executing RouterAgent.route()."""
+    # 1. Get or create chat session
+    chat_doc = await _get_or_create_chat(user_id, chat_request.chatId)
     actual_chat_id = str(chat_doc["_id"])
-    is_new_chat = chat_id is None or chat_doc.get("messageCount", 0) == 0
+    is_new_chat = chat_request.chatId is None or chat_doc.get("messageCount", 0) == 0
+
+    # Ensure chatId is assigned in request
+    chat_request.chatId = actual_chat_id
 
     # 2. Save user message BEFORE streaming
     user_msg_id = str(ObjectId())
@@ -367,7 +218,7 @@ async def agent_stream(
         "_id": ObjectId(user_msg_id),
         "chatId": actual_chat_id,
         "role": MessageRole.USER.value,
-        "content": message,
+        "content": chat_request.message,
         "agentType": None,
         "sources": [],
         "tokensUsed": None,
@@ -376,89 +227,29 @@ async def agent_stream(
     }
     await MongoDB.messages().insert_one(user_msg_doc)
 
-    # 3. Context gathering
+    # 3. Short-term memory window
     st_memory = ShortTermMemory(actual_chat_id, user_id)
     history = await st_memory.get_window_with_summary()
-    memory_context, graph_context = await _build_full_system_context(message, user_id)
-
-    # 4. RAG retrieval check
-    pipeline = RAGRetrievalPipeline()
-    chunks = await pipeline.retrieve_with_context(
-        query=message,
-        user_id=user_id,
-        chat_history=history,
-        n_chunks=5,
-    )
 
     async def event_generator():
-        accumulated_text = []
-        model_used_ref = [FLASH_MODEL]
-        agent_type_ref = [AgentType.RAG if chunks else AgentType.DIRECT]
-        sources_ref = []
+        accumulated_text: list[str] = []
+        last_metadata: dict[str, Any] = {}
 
         try:
-            if chunks:
-                prompt = pipeline.build_rag_prompt(message, chunks, history)
-                injected = []
-                if memory_context:
-                    injected.append(f"USER MEMORY PROFILE:\n{memory_context}")
-                if graph_context:
-                    injected.append(graph_context)
-                if injected:
-                    prompt = "\n\n".join(injected) + "\n\n" + prompt
-
-                sources_ref = [
-                    Source(
-                        documentId=c.documentId,
-                        filename=c.filename,
-                        pageNumber=c.pageNumber,
-                        chunkText=c.chunkText[:200],
-                        score=c.score,
-                    )
-                    for c in chunks
-                ]
-
-                async for chunk in streaming_manager.stream_gemini(
-                    prompt=prompt,
-                    model_name=FLASH_MODEL,
-                    chat_id=actual_chat_id,
-                    agent_type=agent_type_ref[0].value,
-                    sources=sources_ref,
-                ):
-                    if chunk.type == "token":
-                        accumulated_text.append(chunk.content)
-                    data_str = json.dumps(chunk.model_dump())
-                    yield f"data: {data_str}\n\n"
-
-            else:
-                model_used_ref[0] = GROQ_MODEL if GROQ_AVAILABLE else FLASH_MODEL
-                system_instruction = (
-                    "You are NexaMind, a helpful personal AI assistant. "
-                    "Be concise, accurate, and friendly. Respond in clear markdown."
-                )
-                if memory_context:
-                    system_instruction += f"\n\nUSER MEMORY:\n{memory_context}"
-                if graph_context:
-                    system_instruction += f"\n\n{graph_context}"
-
-                messages_list = [{"role": "system", "content": system_instruction}]
-                for m in history[-8:]:
-                    messages_list.append({"role": m.get("role", "user"), "content": m.get("content", "")})
-                messages_list.append({"role": "user", "content": message})
-
-                async for chunk in streaming_manager.stream_groq(
-                    messages=messages_list,
-                    model_name=model_used_ref[0],
-                    chat_id=actual_chat_id,
-                    agent_type=agent_type_ref[0].value,
-                ):
-                    if chunk.type == "token":
-                        accumulated_text.append(chunk.content)
-                    data_str = json.dumps(chunk.model_dump())
-                    yield f"data: {data_str}\n\n"
+            async for chunk in router_agent.route(
+                chat_request=chat_request,
+                user_id=user_id,
+                chat_history=history,
+            ):
+                if chunk.type == "token":
+                    accumulated_text.append(chunk.content)
+                elif chunk.type == "done":
+                    last_metadata = chunk.metadata or {}
+                data_str = json.dumps(chunk.model_dump())
+                yield f"data: {data_str}\n\n"
 
         except Exception as stream_err:
-            logger.error("Streaming generator error: %s", stream_err)
+            logger.error("Streaming generator exception: %s", stream_err)
             err_json = json.dumps({"type": "error", "content": str(stream_err), "metadata": {}})
             yield f"data: {err_json}\n\n"
 
@@ -466,16 +257,19 @@ async def agent_stream(
         full_content = "".join(accumulated_text).strip()
         if full_content:
             assistant_msg_id = str(ObjectId())
-            source_docs = [s.model_dump() for s in sources_ref]
+            source_docs = last_metadata.get("sources", [])
+            model_used = last_metadata.get("modelUsed", "gemini-2.5-flash")
+            agent_type_val = last_metadata.get("agentType", AgentType.DIRECT.value)
+
             assistant_msg_doc = {
                 "_id": ObjectId(assistant_msg_id),
                 "chatId": actual_chat_id,
                 "role": MessageRole.ASSISTANT.value,
                 "content": full_content,
-                "agentType": agent_type_ref[0].value,
+                "agentType": agent_type_val,
                 "sources": source_docs,
                 "tokensUsed": None,
-                "modelUsed": model_used_ref[0],
+                "modelUsed": model_used,
                 "createdAt": datetime.now(tz=timezone.utc),
             }
             await MongoDB.messages().insert_one(assistant_msg_doc)
@@ -489,16 +283,16 @@ async def agent_stream(
             }
             if is_new_chat or chat_doc.get("title", "New Chat") == "New Chat":
                 try:
-                    title = await _generate_title(message)
+                    title = await _generate_title(chat_request.message)
                     update_data["$set"]["title"] = title
                 except Exception:
                     pass
             await MongoDB.chats().update_one({"_id": ObjectId(actual_chat_id)}, update_data)
 
-            # Fire memory and graph extractions in background
+            # Fire background memory & graph extractions
             asyncio.create_task(
                 long_term_memory.extract_and_save(
-                    user_message=message,
+                    user_message=chat_request.message,
                     assistant_message=full_content,
                     user_id=user_id,
                     chat_id=actual_chat_id,
@@ -507,7 +301,7 @@ async def agent_stream(
             )
             asyncio.create_task(
                 graph_pipeline.process(
-                    user_message=message,
+                    user_message=chat_request.message,
                     assistant_message=full_content,
                     user_id=user_id,
                     chat_id=actual_chat_id,
@@ -525,21 +319,8 @@ async def agent_stream(
     )
 
 
-@router.post("/chat/stream")
-async def agent_chat_stream_post(
-    request: ChatRequest,
-    current_user: Annotated[TokenPayload, Depends(get_current_user)],
-) -> StreamingResponse:
-    """Streams chat response tokens for POST JSON payload (Next.js proxy gateway)."""
-    return await agent_stream(
-        message=request.message,
-        chat_id=request.chatId,
-        current_user=current_user,
-    )
-
-
 # ═════════════════════════════════════════════════════════════════════════════
-# GET /api/v1/agent/me
+# GET /api/v1/agent/me — Smoke Test Endpoint
 # ═════════════════════════════════════════════════════════════════════════════
 
 @router.get("/me")
@@ -593,71 +374,20 @@ async def _get_or_create_chat(user_id: str, chat_id: Optional[str]) -> dict:
     return new_chat
 
 
-async def _call_gemini(prompt: str, model_name: str) -> tuple[str, str]:
-    model = genai.GenerativeModel(model_name)
-    response = await asyncio.to_thread(model.generate_content, prompt)
-    text = response.text or ""
-    return text, model_name
-
-
-async def _call_direct(
-    query: str,
-    history: list[dict],
-    memory_context: str = "",
-    graph_context: str = "",
-) -> tuple[str, str]:
-    system_parts = [
-        "You are NexaMind, a helpful personal AI assistant. "
-        "Be concise, accurate, and friendly. Respond in clear markdown."
-    ]
-    if memory_context:
-        system_parts.append(f"USER MEMORY:\n{memory_context}")
-    if graph_context:
-        system_parts.append(graph_context)
-
-    system_prompt = "\n\n".join(system_parts)
-
-    if GROQ_AVAILABLE and _groq_client is not None:
-        groq_messages: list[dict] = [{"role": "system", "content": system_prompt}]
-        for msg in history[-8:]:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role in ("user", "assistant"):
-                groq_messages.append({"role": role, "content": content})
-        groq_messages.append({"role": "user", "content": query})
-
-        try:
-            response = await _groq_client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=groq_messages,  # type: ignore[arg-type]
-                max_tokens=1024,
-                temperature=0.7,
-            )
-            text = response.choices[0].message.content or ""
-            return text, GROQ_MODEL
-        except Exception as exc:
-            logger.warning("Groq call failed, falling back to Gemini: %s", exc)
-
-    history_text = "\n".join(
-        f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
-        for m in history[-5:]
-    )
-    prompt = (
-        f"{system_prompt}\n\n"
-        f"CONVERSATION HISTORY:\n{history_text}\n\n"
-        f"USER: {query}"
-    )
-    return await _call_gemini(prompt, FLASH_MODEL)
-
-
 async def _generate_title(first_message: str) -> str:
+    choice = select_model("title_generation")
     prompt = (
         f"Generate a concise chat title (maximum 5 words) for a conversation "
         f"that starts with this message. Return ONLY the title, no punctuation:\n\n"
         f"{first_message[:300]}"
     )
     try:
-        text, _ = await _call_gemini(prompt, FLASH_LITE_MODEL)
+        model = genai.GenerativeModel(choice["model"])
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        try:
+            text = response.text or ""
+        except (ValueError, AttributeError):
+            text = ""
         words = text.strip().split()[:5]
         return " ".join(words) or "New Chat"
     except Exception as exc:
