@@ -5,6 +5,7 @@ Manages token-by-token Server-Sent Events (SSE) streaming from Gemini and Groq m
 Formats stream output as JSON-encoded StreamChunk objects.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, AsyncGenerator, Literal, Optional
@@ -66,24 +67,64 @@ class StreamingManager:
         agent_type: str = "rag",
         sources: Optional[list] = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        """Streams tokens asynchronously from Gemini."""
+        """Streams tokens asynchronously from Gemini.
+
+        Handles Gemini 2.5 thinking models that emit internal reasoning chunks
+        where accessing `.text` raises a ValueError — those chunks are skipped
+        silently. If the model returns no output text at all, a fallback
+        non-streaming call is made to ensure we never send an empty response.
+        """
         sources_list = sources or []
-        full_text = []
+        full_text: list[str] = []
 
         try:
+            # Disable thinking tokens for streaming to avoid chunks where .text
+            # raises ValueError (Gemini 2.5 thinking models emit thought-only
+            # chunks that have no output text). The per-chunk guard below is a
+            # safety net in case an older SDK doesn't support thinking_config.
+            generation_config: dict = {}
+            if "2.5" in model_name:
+                generation_config["thinking_config"] = {"thinking_budget": 0}
+
             model = genai.GenerativeModel(
                 model_name=model_name,
                 system_instruction=system_instruction,
+                generation_config=generation_config or None,
             )
             response = await model.generate_content_async(prompt, stream=True)
 
             async for chunk in response:
-                text = chunk.text or ""
+                # Gemini 2.5 thinking-model chunks may raise ValueError on .text
+                # when they contain only internal thought tokens — skip them.
+                try:
+                    text = chunk.text or ""
+                except (ValueError, AttributeError):
+                    text = ""
+
                 if text:
                     full_text.append(text)
                     yield StreamChunk(type="token", content=text)
 
             complete_content = "".join(full_text)
+
+            # Guard: if the streaming pass returned nothing, do a synchronous
+            # fallback to avoid sending an empty "done" event which causes the
+            # "model output must contain either output text or tool calls" error.
+            if not complete_content.strip():
+                logger.warning(
+                    "Gemini streaming returned empty text for model=%s. "
+                    "Falling back to non-streaming call.",
+                    model_name,
+                )
+                fallback_response = await asyncio.to_thread(
+                    model.generate_content, prompt
+                )
+                try:
+                    complete_content = fallback_response.text or "I'm sorry, I couldn't generate a response. Please try again."
+                except (ValueError, AttributeError):
+                    complete_content = "I'm sorry, I couldn't generate a response. Please try again."
+                yield StreamChunk(type="token", content=complete_content)
+
             metadata = {
                 "agentType": agent_type,
                 "sources": [
