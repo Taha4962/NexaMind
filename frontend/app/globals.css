@@ -86,4 +86,111 @@
   .glass {
     @apply bg-white/5 backdrop-blur-xl border border-white/10;
   }
+
+  /* Glow effects */
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3), 0 0 40px hsl(var(--primary) / 0.1);
+  }
+
+  .glow-sm {
+    box-shadow: 0 0 10px hsl(var(--primary) / 0.2);
+  }
+
+  /* Streaming cursor */
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  .streaming-cursor::after {
+    content: '▋';
+    @apply text-primary ml-0.5 inline-block;
+    animation: blink 1s step-end infinite;
+  }
+
+  /* Typing dots */
+  @keyframes bounce-dot {
+    0%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-6px); }
+  }
+
+  .typing-dot {
+    @apply w-2 h-2 rounded-full bg-primary/60;
+    animation: bounce-dot 1.4s ease-in-out infinite;
+  }
+
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+  /* Message entrance animation */
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .message-enter {
+    animation: slide-up 0.25s ease-out forwards;
+  }
+
+  /* Sidebar chat item */
+  .sidebar-item {
+    @apply relative flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm cursor-pointer
+           text-muted-foreground transition-all duration-150
+           hover:bg-accent hover:text-foreground;
+  }
+
+  .sidebar-item.active {
+    @apply bg-primary/10 text-foreground border border-primary/20;
+  }
+
+  .sidebar-item.active::before {
+    content: '';
+    @apply absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary;
+  }
+
+  /* Prose overrides for dark theme */
+  .prose-dark {
+    @apply text-foreground;
+  }
+
+  .prose-dark h1, .prose-dark h2, .prose-dark h3,
+  .prose-dark h4, .prose-dark h5, .prose-dark h6 {
+    @apply text-foreground font-semibold;
+  }
+
+  .prose-dark code {
+    @apply bg-accent text-primary px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  .prose-dark pre {
+    @apply bg-transparent p-0 m-0;
+  }
+
+  .prose-dark blockquote {
+    @apply border-l-2 border-primary/40 pl-4 text-muted-foreground italic;
+  }
+
+  .prose-dark a {
+    @apply text-primary underline underline-offset-2 hover:text-primary/80;
+  }
+
+  .prose-dark ul, .prose-dark ol {
+    @apply pl-5;
+  }
+
+  .prose-dark hr {
+    @apply border-border;
+  }
+
+  .prose-dark table {
+    @apply w-full text-sm border-collapse;
+  }
+
+  .prose-dark th {
+    @apply border border-border bg-accent px-3 py-2 text-left font-medium;
+  }
+
+  .prose-dark td {
+    @apply border border-border px-3 py-2;
+  }
 }
