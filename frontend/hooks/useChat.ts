@@ -9,8 +9,8 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import api, { streamChat, StreamChunk } from "@/lib/api";
-import type { ApiResponse, Chat, ChatWithMessages, Message } from "@/types";
+import api, { streamChat } from "@/lib/api";
+import type { ApiResponse, Chat, Message } from "@/types";
 
 // ── 1. useChat Hook ─────────────────────────────────────────────────────────
 
