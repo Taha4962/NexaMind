@@ -525,6 +525,19 @@ async def agent_stream(
     )
 
 
+@router.post("/chat/stream")
+async def agent_chat_stream_post(
+    request: ChatRequest,
+    current_user: Annotated[TokenPayload, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Streams chat response tokens for POST JSON payload (Next.js proxy gateway)."""
+    return await agent_stream(
+        message=request.message,
+        chat_id=request.chatId,
+        current_user=current_user,
+    )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # GET /api/v1/agent/me
 # ═════════════════════════════════════════════════════════════════════════════
