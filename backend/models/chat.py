@@ -32,17 +32,21 @@ class AgentType(str, Enum):
 # ── Source Attribution ────────────────────────────────────────────────────────
 
 class Source(BaseModel):
-    """Source attribution for RAG-generated responses."""
+    """Source attribution for RAG-generated or web-search responses."""
 
-    documentId: str = Field(..., description="Source document ID")
-    filename: str = Field(..., description="Original filename")
+    documentId: str = Field(..., description="Source document ID or URL (web sources)")
+    filename: str = Field(..., description="Original filename or page title (web sources)")
     pageNumber: Optional[int] = Field(
         default=None,
-        description="Page number in the source document",
+        description="Page number in the source document (RAG only)",
     )
     chunkText: str = Field(
         ...,
-        description="First 150 characters of the source chunk",
+        description="First 150 characters of the source chunk or web snippet",
+    )
+    url: Optional[str] = Field(
+        default=None,
+        description="Full source URL (web sources only; None for document sources)",
     )
 
     # Backward-compatible aliases used by legacy consumers
@@ -53,6 +57,7 @@ class Source(BaseModel):
     @property
     def chunk_text(self) -> str:
         return self.chunkText
+
 
 
 # ── Core Domain Models ────────────────────────────────────────────────────────
